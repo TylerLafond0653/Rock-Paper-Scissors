@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Neural Link Active</title>
+    <style>
+        /* CORE LAYOUT */
+        body { margin: 0; padding: 0; background-color: #000; height: 100vh; width: 100vw; overflow: hidden; display: flex; justify-content: center; align-items: center; font-family: 'Segoe UI', sans-serif; }
+        .video-wrapper { position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: #000; }
+        .video-bg { width: 100%; height: 100%; object-fit: contain; z-index: 1; }
+        
+        /* OVERLAYS */
+        .scanlines { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1)); background-size: 100% 4px; z-index: 5; pointer-events: none; }
+        .hud-status-bar { position: absolute; top: 0; left: 0; width: 100%; height: 4px; background: #00ffcc; box-shadow: 0 0 10px #00ffcc; z-index: 20; transition: background 0.5s; }
+        
+        /* CONTROLS */
+        .ui-layer { position: absolute; bottom: 30px; right: 30px; width: auto; z-index: 30; display: flex; gap: 20px; align-items: center; }
+        .btn { padding: 15px 40px; font-size: 1.1em; font-weight: 800; letter-spacing: 2px; color: #fff; text-transform: uppercase; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ffcc; cursor: pointer; transition: all 0.2s; box-shadow: 0 0 10px rgba(0, 255, 204, 0.2); }
+        .btn:hover { background: #00ffcc; color: #000; box-shadow: 0 0 20px rgba(0, 255, 204, 0.6); }
+        .btn:disabled { border-color: #555; color: #888; background: black; cursor: not-allowed; }
+        #exitBtn { border-color: #ff3366; }
+        #exitBtn:hover { background: #ff3366; color: white; }
+
+        /* TOGGLE SWITCH STYLE */
+        .switch-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-right: 10px; }
+        .label-text { color: #00ffcc; font-size: 0.7em; font-weight: bold; letter-spacing: 1px; margin-top: 5px; text-shadow: 0 0 5px #00ffcc; }
+        
+        .switch { position: relative; display: inline-block; width: 60px; height: 30px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,0,0,0.3); border: 2px solid #ff3366; transition: .4s; clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .4s; clip-path: polygon(2px 0, 100% 0, 100% calc(100% - 2px), calc(100% - 2px) 100%, 0 100%, 0 2px); }
+        input:checked + .slider { background-color: rgba(0,255,204,0.3); border-color: #00ffcc; }
+        input:checked + .slider:before { transform: translateX(30px); background-color: #00ffcc; box-shadow: 0 0 10px #00ffcc; }
+
+        /* WIN SCREEN */
+        #winScreen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 100; display: flex; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.5s; }
+        #winScreen.active { opacity: 1; pointer-events: all; }
+        
+        .win-content { position: relative; z-index: 200; text-align: center; display: flex; flex-direction: column; align-items: center; }
+        .win-title { font-size: 6em; font-weight: 900; color: #fff; text-transform: uppercase; letter-spacing: 10px; animation: glitch 1s linear infinite; }
+        .win-subtitle { font-size: 2em; color: #00ffcc; margin-bottom: 30px; letter-spacing: 5px; }
+        .menu-btn { padding: 20px 60px; font-size: 1.5em; background: transparent; color: white; border: 3px solid white; cursor: pointer; font-weight: bold; text-transform: uppercase; margin-top: 30px; }
+        .menu-btn:hover { background: white; color: black; }
+        
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; text-align: center; margin-bottom: 20px; }
+        .stat-item { background: rgba(0, 0, 0, 0.8); padding: 20px; border: 1px solid #444; border-radius: 8px; min-width: 150px; box-shadow: 0 0 20px rgba(255,255,255,0.1); }
+        .stat-label { color: #888; font-size: 0.9em; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+        .stat-value { color: #fff; font-size: 2em; font-weight: bold; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+
+        @keyframes glitch { 2%, 64% { transform: translate(2px,0) skew(0deg); } 4%, 60% { transform: translate(-2px,0) skew(0deg); } 62% { transform: translate(0,0) skew(5deg); } }
+        #confettiCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 150; }
+    </style>
+</head>
+<body>
+    <div class="video-wrapper">
+        <div class="scanlines"></div>
+        <div id="statusBar" class="hud-status-bar"></div>
+        <img src="{{ url_for('video_feed') }}" class="video-bg">
+    </div>
+    
+    <div class="ui-layer" id="gameUI">
+        <div class="switch-container">
+            <label class="switch">
+                <input type="checkbox" id="assistToggle" checked>
+                <span class="slider"></span>
+            </label>
+            <span class="label-text">AI ASSIST</span>
+        </div>
+
+        <button id="actionBtn" class="btn" onclick="startRound()">INITIALIZE ROUND</button>
+        <a href="/" class="btn" id="exitBtn">ABORT</a>
+    </div>
+
+    <div id="winScreen">
+        <div class="win-content">
+            <div class="win-title" id="winTitle">VICTORY</div>
+            <div class="win-subtitle" id="winSub">OPPONENT ELIMINATED</div>
+            
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-item">
+                    <div class="stat-label">Predictability</div>
+                    <div class="stat-value" id="statPred">0%</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">AI Accuracy</div>
+                    <div class="stat-value" id="statAcc">0%</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Fav Weapon</div>
+                    <div class="stat-value" id="statFav">N/A</div>
+                </div>
+            </div>
+
+            <button class="menu-btn" onclick="window.location.href='/'">SYSTEM RESET</button>
+        </div>
+        <canvas id="confettiCanvas"></canvas>
+    </div>
+
+    <script>
+        const btn = document.getElementById("actionBtn");
+        const statusBar = document.getElementById("statusBar");
+        const winScreen = document.getElementById("winScreen");
+        const winTitle = document.getElementById("winTitle");
+        const winSub = document.getElementById("winSub");
+        let polling = false;
+
+        async function startRound() {
+            // Get Toggle State
+            const assist = document.getElementById('assistToggle').checked;
+            
+            // Send to Python
+            await fetch(`/action/start_round?assist=${assist}`);
+            
+            btn.innerText = "SYSTEM ACTIVE...";
+            btn.disabled = true;
+            btn.style.borderColor = "#999";
+            statusBar.style.background = "#ffff00"; 
+            polling = true;
+            pollStatus();
+        }
+
+        async function pollStatus() {
+            if (!polling) return;
+            let response = await fetch('/status');
+            let data = await response.json();
+
+            if (data.phase === "JUDGE") {
+                polling = false;
+                btn.innerText = "NEXT SEQUENCE >>";
+                btn.disabled = false;
+                btn.style.borderColor = "#00ffcc";
+                statusBar.style.background = "#00ffcc"; 
+                btn.onclick = async function() {
+                    await fetch('/action/reset');
+                    btn.innerText = "INITIALIZE ROUND";
+                    btn.onclick = startRound;
+                    startRound();
+                };
+            }
+            else if (data.phase === "GAME_OVER") {
+                polling = false;
+                statusBar.style.background = "#ff0055"; 
+                triggerWin(data.p1_name, data.result_type, data.report);
+            }
+            else {
+                setTimeout(pollStatus, 200);
+            }
+        }
+
+        function triggerWin(winnerName, resultType, report) {
+            document.getElementById("gameUI").style.opacity = "0";
+            winTitle.innerText = resultType;
+            winSub.innerText = winnerName + " WINS THE MATCH";
+            
+            if (report) {
+                document.getElementById('statPred').innerText = report.predictability || "0%";
+                document.getElementById('statAcc').innerText = report.accuracy || "0%";
+                document.getElementById('statFav').innerText = report.favorite || "NONE";
+            }
+
+            if (resultType === "VICTORY") {
+                winTitle.style.color = "#00ffcc";
+                startConfetti();
+            } else {
+                winTitle.style.color = "#ff0055";
+            }
+            winScreen.classList.add("active");
+        }
+
+        function startConfetti() {
+            const canvas = document.getElementById("confettiCanvas");
+            const ctx = canvas.getContext("2d");
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            let particles = [];
+            const colors = ['#00ffcc', '#ff0055', '#ffff00'];
+            for (let i = 0; i < 150; i++) {
+                particles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height - canvas.height,
+                    speed: Math.random() * 5 + 2,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    size: Math.random() * 10 + 5
+                });
+            }
+            function animate() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                particles.forEach(p => {
+                    p.y += p.speed;
+                    if (p.y > canvas.height) p.y = -20;
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(p.x, p.y, p.size, p.size);
+                });
+                requestAnimationFrame(animate);
+            }
+            animate();
+        }
+    </script>
+</body>
+</html>
