@@ -3,7 +3,7 @@
 <head>
     <title>RPS-1 System</title>
     <style>
-        /* --- CORE LAYOUT --- */
+        /* CORE LAYOUT */
         body { 
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
             background-color: #050505; 
@@ -30,7 +30,6 @@
             text-transform: uppercase;
         }
         
-        /* --- THE CONFIG BOX (The fix for blurriness) --- */
         .config-box {
             background: #000;
             border: 2px solid #00ffcc;
@@ -43,67 +42,32 @@
             position: relative;
         }
 
-        /* Decorative Corners */
-        .config-box::before {
-            content: ""; position: absolute; top: -5px; left: -5px;
-            width: 20px; height: 20px; border-top: 4px solid white; border-left: 4px solid white;
-        }
-        .config-box::after {
-            content: ""; position: absolute; bottom: -5px; right: -5px;
-            width: 20px; height: 20px; border-bottom: 4px solid white; border-right: 4px solid white;
-        }
+        .config-box::before { content: ""; position: absolute; top: -5px; left: -5px; width: 20px; height: 20px; border-top: 4px solid white; border-left: 4px solid white; }
+        .config-box::after { content: ""; position: absolute; bottom: -5px; right: -5px; width: 20px; height: 20px; border-bottom: 4px solid white; border-right: 4px solid white; }
 
-        /* --- INPUTS --- */
-        label { 
-            display: block; margin-bottom: 8px; 
-            color: #00ffcc; font-size: 0.9em; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;
-        }
+        label { display: block; margin-bottom: 8px; color: #00ffcc; font-size: 0.9em; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
 
         input, select { 
-            background: #111; 
-            border: 1px solid #333; 
-            color: white; 
-            padding: 15px; 
-            width: 100%; 
-            box-sizing: border-box; /* Fixes padding issues */
-            margin-bottom: 25px;
-            font-size: 1.1em;
-            font-family: 'Segoe UI', sans-serif;
-            outline: none;
-            transition: 0.3s;
+            background: #111; border: 1px solid #333; color: white; 
+            padding: 15px; width: 100%; box-sizing: border-box; 
+            margin-bottom: 25px; font-size: 1.1em; outline: none; transition: 0.3s;
         }
 
-        input:focus, select:focus {
-            border-color: #00ffcc;
-            background: #0a0a0a;
-            box-shadow: 0 0 10px rgba(0, 255, 204, 0.3);
-        }
+        input:focus, select:focus { border-color: #00ffcc; background: #0a0a0a; box-shadow: 0 0 10px rgba(0, 255, 204, 0.3); }
 
-        /* --- BUTTONS --- */
         .btn-group { display: flex; gap: 15px; margin-top: 10px; }
         
         .btn {
-            flex: 1; padding: 15px 0;
-            font-size: 1.1em; color: black; background: #00ffcc;
+            flex: 1; padding: 15px 0; font-size: 1.1em; color: black; background: #00ffcc;
             text-decoration: none; border: none; cursor: pointer; 
             font-weight: 800; text-transform: uppercase; letter-spacing: 1px;
             transition: 0.2s;
             clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
         }
         
-        .btn:hover { 
-            transform: translateY(-3px); 
-            box-shadow: 0 5px 20px rgba(0, 255, 204, 0.5);
-            background: white;
-        }
-
-        .btn-multi { 
-            background: #ff0055; color: white; 
-        }
-        .btn-multi:hover { 
-            box-shadow: 0 5px 20px rgba(255, 0, 85, 0.5);
-            background: white; color: #ff0055;
-        }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 5px 20px rgba(0, 255, 204, 0.5); background: white; }
+        .btn-multi { background: #ff0055; color: white; }
+        .btn-multi:hover { box-shadow: 0 5px 20px rgba(255, 0, 85, 0.5); background: white; color: #ff0055; }
 
     </style>
 </head>
@@ -117,6 +81,13 @@
 
         <label>Opponent Identity (P2/AI)</label>
         <input type="text" id="p2Name" value="PLAYER 2" style="border-left: 5px solid #ff0055;">
+
+        <label>Camera Source</label>
+        <select id="cameraIndex">
+            <option value="0">Default (Integrated Webcam)</option>
+            <option value="1">External USB (Cam 1)</option>
+            <option value="2">External USB (Cam 2)</option>
+        </select>
 
         <label>Victory Condition</label>
         <select id="winLimit">
@@ -137,9 +108,10 @@
             const p1 = document.getElementById('p1Name').value;
             const p2 = document.getElementById('p2Name').value;
             const limit = document.getElementById('winLimit').value;
+            const cam = document.getElementById('cameraIndex').value;
 
-            // Send settings to Python
-            await fetch(`/action/setup_game?p1=${p1}&p2=${p2}&limit=${limit}`);
+            // Send camera index to Python
+            await fetch(`/action/setup_game?p1=${p1}&p2=${p2}&limit=${limit}&cam=${cam}`);
 
             // Redirect to game
             window.location.href = `/play/${mode}`;

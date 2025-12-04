@@ -29,7 +29,6 @@ class GameState:
         self.p2_score = 0
         self.target_wins = 3 
         
-        # --- NEW: ADVICE TOGGLE ---
         self.show_advice = True 
         
         self.ai_hands = []
@@ -37,11 +36,14 @@ class GameState:
         self.frozen_strategy = "..."
         self.frozen_prediction = "ANALYZING..."
         
+        # We track if the AI was actually trying to predict this round
+        self.ai_was_predicting = False
         self.last_prediction_raw = None 
-        self.ai_stats = {"R": 0, "P": 0, "S": 0, "conf": 0, "pred": "NONE"}
+        
+        self.ai_stats = {"R": 0, "P": 0, "S": 0, "conf": 0, "pred": "NONE", "active_mode": "NASH"}
         
         self.stats_history = {
-            "total_rounds": 0,
+            "prediction_attempts": 0, # Only count rounds where AI tried to guess
             "ai_correct_guesses": 0,
             "player_moves": [] 
         }
@@ -58,15 +60,19 @@ class MarkovPredictor:
     def __init__(self):
         self.matrix = {} 
         self.last_move = None
+        self.total_moves = 0 
         
     def update(self, current_move):
+        self.total_moves += 1
         if self.last_move is not None:
             transition = (self.last_move, current_move)
             self.matrix[transition] = self.matrix.get(transition, 0) + 1
         self.last_move = current_move
         
     def get_probabilities(self):
-        if self.last_move is None: return 33, 33, 33, None
+        # HYBRID LOGIC: If less than 3 moves, return NONE (Force Nash)
+        if self.total_moves < 3 or self.last_move is None:
+            return 33, 33, 33, None
         
         r_count = self.matrix.get((self.last_move, HandShape.ROCK), 0)
         p_count = self.matrix.get((self.last_move, HandShape.PAPER), 0)
@@ -78,6 +84,7 @@ class MarkovPredictor:
         s_pct = int((s_count / total) * 100)
         
         best_hand = None
+        # Only predict if we have a slight bias (more than 33% chance)
         if r_count > p_count and r_count > s_count: best_hand = HandShape.ROCK
         elif p_count > r_count and p_count > s_count: best_hand = HandShape.PAPER
         elif s_count > r_count and s_count > p_count: best_hand = HandShape.SCISSORS
@@ -99,16 +106,19 @@ class GameStrategy:
         return self.rules.get((my_hand, opp_hand), 0)
 
     def solve_nash(self, my_hands, opp_hands, prediction=None):
+        # HYBRID SWITCH:
         if prediction is not None and prediction in opp_hands:
+            # MODE: EXPLOIT (Markov)
             score0 = self.determine_winner(my_hands[0], prediction)
             score1 = self.determine_winner(my_hands[1], prediction)
             if score0 > score1: return my_hands[0], f"KILLER: {my_hands[0].name}"
             elif score1 > score0: return my_hands[1], f"KILLER: {my_hands[1].name}"
 
+        # MODE: SAFETY (Nash)
         score0 = self.determine_winner(my_hands[0], opp_hands[0]) + self.determine_winner(my_hands[0], opp_hands[1])
         score1 = self.determine_winner(my_hands[1], opp_hands[0]) + self.determine_winner(my_hands[1], opp_hands[1])
         rec = my_hands[0] if score0 >= score1 else my_hands[1]
-        return rec, f"KEEP {rec.name}"
+        return rec, f"NASH: {rec.name}"
 
 class HandDetector:
     def __init__(self):
@@ -153,28 +163,42 @@ predictor = MarkovPredictor()
 
 def generate_report():
     history = state.stats_history
-    total = history["total_rounds"]
-    if total == 0: return
-    accuracy = int((history["ai_correct_guesses"] / total) * 100)
+    # Smart Accuracy: Only count rounds where AI *attempted* a prediction
+    attempts = history["prediction_attempts"]
+    
+    if attempts == 0:
+        accuracy = 0
+    else:
+        accuracy = int((history["ai_correct_guesses"] / attempts) * 100)
+    
     moves = history["player_moves"]
     counts = Counter(moves)
-    if not counts: return
-    fav_hand, fav_count = counts.most_common(1)[0]
-    predictability = int((fav_count / total) * 100)
+    
+    fav_hand_name = "N/A"
+    pred_score = "0%"
+    
+    if counts:
+        fav_hand, fav_count = counts.most_common(1)[0]
+        fav_hand_name = fav_hand.name
+        # Predictability is based on total rounds
+        pred_score = f"{int((fav_count / len(moves)) * 100)}%"
+    
     state.final_report = {
         "accuracy": f"{accuracy}%",
-        "predictability": f"{predictability}%",
-        "favorite": fav_hand.name
+        "predictability": pred_score,
+        "favorite": fav_hand_name
     }
 
 def perform_judgement(p1_hand, p2_hand):
-    state.stats_history["total_rounds"] += 1
     state.stats_history["player_moves"].append(p1_hand)
-    if state.last_prediction_raw == p1_hand:
-        state.stats_history["ai_correct_guesses"] += 1
+    
+    # SMART STATS: Only update accuracy if AI was in Markov Mode
+    if state.ai_was_predicting:
+        state.stats_history["prediction_attempts"] += 1
+        if state.last_prediction_raw == p1_hand:
+            state.stats_history["ai_correct_guesses"] += 1
 
     res = strategy.determine_winner(p1_hand, p2_hand)
-    
     if res == 1: 
         state.winner_msg = "ROUND WON!"
         state.winner_color = (0, 255, 0)
@@ -214,36 +238,51 @@ def draw_hud(frame, opp_display, my_display, strategy_text, center_msg, msg_colo
     if frame is None: return None
     h, w, _ = frame.shape
     
-    cv2.rectangle(frame, (0, 0), (w, 60), (0, 0, 0), -1)
-    cv2.putText(frame, f"{state.p1_name}: {state.p1_score}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    # 1. SCORES
+    cv2.putText(frame, f"{state.p1_name}: {state.p1_score}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
     p2_text = f"{state.p2_name}: {state.p2_score}"
-    ts = cv2.getTextSize(p2_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-    cv2.putText(frame, p2_text, (w - ts[0] - 20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+    text_size = cv2.getTextSize(p2_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
+    hud_start_x = w - int(w * 0.22)
+    p2_x = hud_start_x - text_size[0] - 30
+    cv2.putText(frame, p2_text, (p2_x, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
     
+    # 2. AI HUD
     sidebar_w = int(w * 0.22)
-    if sidebar_w < 220: sidebar_w = 220
+    if sidebar_w < 200: sidebar_w = 200
     sidebar_x = w - sidebar_w
-    cv2.rectangle(frame, (sidebar_x, 60), (w, 320), (0, 0, 0), -1)
     
-    cv2.putText(frame, "THE GUESSER", (sidebar_x + 10, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-    cv2.line(frame, (sidebar_x + 10, 95), (w-10, 95), (255, 255, 0), 1)
+    cv2.rectangle(frame, (sidebar_x, 20), (w-20, 280), (0, 0, 0), -1)
+    cv2.rectangle(frame, (sidebar_x, 20), (w-20, 280), (0, 255, 255), 1)
+    
+    cv2.putText(frame, "NEURAL LINK", (sidebar_x + 10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
     
     stats = state.ai_stats
     bar_max_w = sidebar_w - 90 
-    bar_h = 10
+    bar_h = 8
     
-    cv2.putText(frame, "R", (sidebar_x + 10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-    draw_bar(frame, sidebar_x + 70, 110, bar_max_w, bar_h, stats["R"], (0, 0, 255))
-    cv2.putText(frame, "P", (sidebar_x + 10, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-    draw_bar(frame, sidebar_x + 70, 130, bar_max_w, bar_h, stats["P"], (0, 255, 0))
-    cv2.putText(frame, "S", (sidebar_x + 10, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-    draw_bar(frame, sidebar_x + 70, 150, bar_max_w, bar_h, stats["S"], (0, 255, 255))
+    # VISUALIZE ACTIVE MODE
+    if stats["active_mode"] == "NASH":
+        bar_col = (50, 50, 50) # Greyed out
+        pred_label = "OBSERVING..."
+        pred_col = (100, 100, 100)
+    else:
+        bar_col = None # Use standard colors
+        pred_label = stats["pred"]
+        pred_col = (0, 255, 255)
+
+    cv2.putText(frame, "R", (sidebar_x + 10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+    draw_bar(frame, sidebar_x + 70, 70, bar_max_w, bar_h, stats["R"], bar_col if bar_col else (0, 0, 255))
     
-    cv2.putText(frame, "PREDICTION:", (sidebar_x + 10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-    pred_txt = stats["pred"] if stats["pred"] != "NONE" else "WAITING..."
-    cv2.putText(frame, pred_txt, (sidebar_x + 10, 225), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+    cv2.putText(frame, "P", (sidebar_x + 10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+    draw_bar(frame, sidebar_x + 70, 90, bar_max_w, bar_h, stats["P"], bar_col if bar_col else (0, 255, 0))
     
-    cv2.putText(frame, "COUNTER:", (sidebar_x + 10, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+    cv2.putText(frame, "S", (sidebar_x + 10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+    draw_bar(frame, sidebar_x + 70, 110, bar_max_w, bar_h, stats["S"], bar_col if bar_col else (0, 255, 255))
+    
+    cv2.putText(frame, "PREDICTION:", (sidebar_x + 10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+    cv2.putText(frame, pred_label, (sidebar_x + 10, 175), cv2.FONT_HERSHEY_SIMPLEX, 0.6, pred_col, 2)
+    
+    cv2.putText(frame, "AI DEPLOYMENT:", (sidebar_x + 10, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
     
     ai_move_text = "..."
     ai_color = (100, 100, 100)
@@ -252,29 +291,26 @@ def draw_hud(frame, opp_display, my_display, strategy_text, center_msg, msg_colo
             ai_move_text = state.ai_hands[0].name
             ai_color = (0, 0, 255)
         elif len(state.ai_hands) == 2: 
-            ai_move_text = f"{state.ai_hands[0].name} + {state.ai_hands[1].name}"
+            ai_move_text = f"{state.ai_hands[0].name[:3]} + {state.ai_hands[1].name[:3]}"
             ai_color = (0, 165, 255)
             
-    font_s = 0.6 if len(ai_move_text) < 12 else 0.4
-    cv2.putText(frame, ai_move_text, (sidebar_x + 10, 285), cv2.FONT_HERSHEY_SIMPLEX, font_s, ai_color, 2)
+    cv2.putText(frame, ai_move_text, (sidebar_x + 10, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ai_color, 2)
 
-    cv2.rectangle(frame, (0, h-50), (w, h), (0, 0, 0), -1)
-    cv2.putText(frame, "YOU:", (20, h-20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    my_str = " + ".join([h.name for h in my_display]) if my_display else "..."
-    cv2.putText(frame, my_str, (70, h-20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    # 3. PLAYER DASHBOARD
+    cv2.putText(frame, "DETECTED:", (30, h-70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    my_str = "..."
+    if len(my_display) > 0:
+        my_str = " + ".join([h.name for h in my_display])
+    cv2.putText(frame, my_str, (140, h-70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-    # --- CENTER ADVICE LOGIC (THE TOGGLE) ---
     advice_text = strategy_text
     advice_color = (255, 255, 0)
-    
-    # If toggle is OFF, hide the text
     if not state.show_advice:
-        advice_text = "DATA ENCRYPTED"
+        advice_text = "ENCRYPTED"
         advice_color = (100, 100, 100)
 
-    advice_size = cv2.getTextSize(advice_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-    advice_x = (w - advice_size[0]) // 2
-    cv2.putText(frame, advice_text, (advice_x, h-15), cv2.FONT_HERSHEY_SIMPLEX, 0.7, advice_color, 2)
+    cv2.putText(frame, advice_text, (30, h-30), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 6)
+    cv2.putText(frame, advice_text, (30, h-30), cv2.FONT_HERSHEY_SIMPLEX, 1.2, advice_color, 3)
 
     if center_msg:
         if state.phase == "GAME_OVER":
@@ -291,10 +327,11 @@ def draw_hud(frame, opp_display, my_display, strategy_text, center_msg, msg_colo
 
 def generate_frames():
     global state
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap_idx = int(state.camera_index)
+    cap = cv2.VideoCapture(cap_idx, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    if not cap.isOpened(): cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+    if not cap.isOpened(): cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     if not cap.isOpened(): return 
 
     while True:
@@ -311,10 +348,13 @@ def generate_frames():
         current_opp, current_my = [], []
         
         r_pct, p_pct, s_pct, best_guess = predictor.get_probabilities()
+        is_markov_active = best_guess is not None
+        
         state.ai_stats["R"] = r_pct
         state.ai_stats["P"] = p_pct
         state.ai_stats["S"] = s_pct
         state.ai_stats["pred"] = best_guess.name if best_guess else "NONE"
+        state.ai_stats["active_mode"] = "MARKOV" if is_markov_active else "NASH"
 
         if state.phase == "IDLE":
             center_msg, msg_color = "PRESS INITIALIZE", (200, 200, 200)
@@ -342,15 +382,19 @@ def generate_frames():
 
             if len(current_my) >= 2 and len(current_opp) >= 2:
                 state.user_hands_snapshot = current_my
-                state.last_prediction_raw = best_guess
-                state.frozen_strategy = strategy.solve_nash(current_my, current_opp, best_guess)[1]
+                pred_to_use = best_guess if is_markov_active else None
+                state.last_prediction_raw = pred_to_use
+                
+                # --- NEW: Record that we TRIED to predict this round ---
+                state.ai_was_predicting = is_markov_active
+                
+                state.frozen_strategy = strategy.solve_nash(current_my, current_opp, pred_to_use)[1]
                 
                 if time.time() - state.start_time > 0.5:
                     state.phase = "DECIDE"
                     state.judge_timer_start = 0
 
         elif state.phase == "DECIDE":
-            # Advice is determined in draw_hud based on toggle state
             current_opp = state.ai_hands if state.mode == 'single' else all_top[:2]
             current_my = all_bottom
 
@@ -379,7 +423,6 @@ def generate_frames():
             center_msg, msg_color = state.game_over_msg, (0, 255, 255)
 
         frame = draw_hud(frame, current_opp, current_my, state.frozen_strategy, center_msg, msg_color)
-        
         if frame is None: continue 
 
         try:
@@ -399,6 +442,7 @@ def setup_game():
     state.p1_name = request.args.get('p1', 'Player 1')
     state.p2_name = request.args.get('p2', 'AI')
     state.target_wins = int(request.args.get('limit', 3))
+    state.camera_index = int(request.args.get('cam', 0))
     state.p1_score = 0
     state.p2_score = 0
     state.phase = "IDLE"
@@ -418,11 +462,8 @@ def video_feed(): return Response(generate_frames(), mimetype='multipart/x-mixed
 @app.route('/action/start_round')
 def start_round():
     if state.phase == "GAME_OVER": return jsonify(status="game_over")
-    
-    # --- GET TOGGLE STATE ---
     assist = request.args.get('assist', 'true') == 'true'
     state.show_advice = assist
-    
     state.phase = "COUNTDOWN"
     state.start_time = time.time()
     return jsonify(status="ok")

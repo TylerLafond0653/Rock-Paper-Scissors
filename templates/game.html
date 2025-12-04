@@ -6,24 +6,34 @@
         /* CORE LAYOUT */
         body { margin: 0; padding: 0; background-color: #000; height: 100vh; width: 100vw; overflow: hidden; display: flex; justify-content: center; align-items: center; font-family: 'Segoe UI', sans-serif; }
         .video-wrapper { position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: #000; }
-        .video-bg { width: 100%; height: 100%; object-fit: contain; z-index: 1; }
+        
+        /* VIDEO - Added transition for smooth zooming */
+        .video-bg { width: 100%; height: 100%; object-fit: contain; z-index: 1; transition: transform 0.1s ease-out; }
         
         /* OVERLAYS */
         .scanlines { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1)); background-size: 100% 4px; z-index: 5; pointer-events: none; }
         .hud-status-bar { position: absolute; top: 0; left: 0; width: 100%; height: 4px; background: #00ffcc; box-shadow: 0 0 10px #00ffcc; z-index: 20; transition: background 0.5s; }
         
-        /* CONTROLS */
-        .ui-layer { position: absolute; bottom: 30px; right: 30px; width: auto; z-index: 30; display: flex; gap: 20px; align-items: center; }
+        /* CONTROLS CONTAINER */
+        .ui-layer { 
+            position: absolute; bottom: 30px; right: 30px; width: auto; z-index: 30; 
+            display: flex; gap: 20px; align-items: center; 
+            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 10px; border: 1px solid #333;
+            backdrop-filter: blur(5px);
+        }
+
+        /* BUTTONS */
         .btn { padding: 15px 40px; font-size: 1.1em; font-weight: 800; letter-spacing: 2px; color: #fff; text-transform: uppercase; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ffcc; cursor: pointer; transition: all 0.2s; box-shadow: 0 0 10px rgba(0, 255, 204, 0.2); }
         .btn:hover { background: #00ffcc; color: #000; box-shadow: 0 0 20px rgba(0, 255, 204, 0.6); }
         .btn:disabled { border-color: #555; color: #888; background: black; cursor: not-allowed; }
         #exitBtn { border-color: #ff3366; }
         #exitBtn:hover { background: #ff3366; color: white; }
 
-        /* TOGGLE SWITCH STYLE */
-        .switch-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-right: 10px; }
+        /* CONTROL LABELS */
+        .control-group { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-right: 10px; }
         .label-text { color: #00ffcc; font-size: 0.7em; font-weight: bold; letter-spacing: 1px; margin-top: 5px; text-shadow: 0 0 5px #00ffcc; }
         
+        /* TOGGLE SWITCH */
         .switch { position: relative; display: inline-block; width: 60px; height: 30px; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,0,0,0.3); border: 2px solid #ff3366; transition: .4s; clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
@@ -31,10 +41,17 @@
         input:checked + .slider { background-color: rgba(0,255,204,0.3); border-color: #00ffcc; }
         input:checked + .slider:before { transform: translateX(30px); background-color: #00ffcc; box-shadow: 0 0 10px #00ffcc; }
 
+        /* ZOOM SLIDER STYLE */
+        input[type=range] {
+            -webkit-appearance: none; width: 100px; height: 6px; background: #333; outline: none; border-radius: 3px; border: 1px solid #555;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: #00ffcc; cursor: pointer; border-radius: 50%; box-shadow: 0 0 10px #00ffcc;
+        }
+
         /* WIN SCREEN */
         #winScreen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 100; display: flex; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.5s; }
         #winScreen.active { opacity: 1; pointer-events: all; }
-        
         .win-content { position: relative; z-index: 200; text-align: center; display: flex; flex-direction: column; align-items: center; }
         .win-title { font-size: 6em; font-weight: 900; color: #fff; text-transform: uppercase; letter-spacing: 10px; animation: glitch 1s linear infinite; }
         .win-subtitle { font-size: 2em; color: #00ffcc; margin-bottom: 30px; letter-spacing: 5px; }
@@ -54,11 +71,16 @@
     <div class="video-wrapper">
         <div class="scanlines"></div>
         <div id="statusBar" class="hud-status-bar"></div>
-        <img src="{{ url_for('video_feed') }}" class="video-bg">
+        <img src="{{ url_for('video_feed') }}" class="video-bg" id="videoFeed">
     </div>
     
     <div class="ui-layer" id="gameUI">
-        <div class="switch-container">
+        <div class="control-group">
+            <input type="range" id="zoomSlider" min="0.5" max="1.5" step="0.1" value="1.0">
+            <span class="label-text">DISPLAY SCALE</span>
+        </div>
+
+        <div class="control-group">
             <label class="switch">
                 <input type="checkbox" id="assistToggle" checked>
                 <span class="slider"></span>
@@ -101,15 +123,19 @@
         const winScreen = document.getElementById("winScreen");
         const winTitle = document.getElementById("winTitle");
         const winSub = document.getElementById("winSub");
+        
+        // ZOOM LOGIC
+        const zoomSlider = document.getElementById('zoomSlider');
+        const videoBg = document.getElementById('videoFeed');
+        zoomSlider.addEventListener('input', function() {
+            videoBg.style.transform = `scale(${this.value})`;
+        });
+
         let polling = false;
 
         async function startRound() {
-            // Get Toggle State
             const assist = document.getElementById('assistToggle').checked;
-            
-            // Send to Python
             await fetch(`/action/start_round?assist=${assist}`);
-            
             btn.innerText = "SYSTEM ACTIVE...";
             btn.disabled = true;
             btn.style.borderColor = "#999";
