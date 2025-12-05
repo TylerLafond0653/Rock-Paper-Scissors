@@ -1,12 +1,9 @@
-# --- COPY THIS INTO A JUPYTER NOTEBOOK CELL ---
-
 import cv2
 import mediapipe as mp
 import numpy as np
 import matplotlib.pyplot as plt
 from enum import Enum
 
-# --- 1. CORE CLASSES (Copied from your app.py) ---
 class HandShape(Enum):
     ROCK = 0
     PAPER = 1
@@ -72,7 +69,6 @@ class HandDetector:
                 
         return img_rgb, detected
 
-# --- 2. THE PROCESSING FUNCTION (Required by Instructor) ---
 def analyze_sample_image(image_path):
     detector = HandDetector()
     strategy = GameStrategy()
@@ -109,11 +105,7 @@ def analyze_sample_image(image_path):
     plt.axis('off')
     plt.show()
 
-# --- 3. RUN TESTS ---
-# Run this cell to verify your 5 images
-# Make sure you upload images named test1.jpg, test2.jpg, etc.
 image_files = ["test1.jpg", "test2.jpg", "test3.jpg", "test4.jpg", "test5.jpg"]
 
-print("--- STARTING BATCH ANALYSIS ---")
 for img_file in image_files:
     analyze_sample_image(img_file)
