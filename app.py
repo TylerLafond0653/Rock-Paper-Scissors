@@ -43,13 +43,14 @@ class GameState:
         self.ai_stats = {"R": 0, "P": 0, "S": 0, "conf": 0, "pred": "NONE", "active_mode": "NASH"}
         
         self.stats_history = {
-            "prediction_attempts": 0, # Only count rounds where AI tried to guess
+            "prediction_attempts": 0, 
             "ai_correct_guesses": 0,
             "player_moves": [] 
         }
         
+        # --- COLOR INITIALIZATION ---
         self.winner_msg = ""
-        self.winner_color = (255, 255, 255)
+        self.winner_color = (0, 255, 0) # Default Green
         self.game_over_msg = ""
         self.round_result_type = ""
         self.final_report = {}
@@ -70,7 +71,6 @@ class MarkovPredictor:
         self.last_move = current_move
         
     def get_probabilities(self):
-        # HYBRID LOGIC: If less than 3 moves, return NONE (Force Nash)
         if self.total_moves < 3 or self.last_move is None:
             return 33, 33, 33, None
         
@@ -84,7 +84,6 @@ class MarkovPredictor:
         s_pct = int((s_count / total) * 100)
         
         best_hand = None
-        # Only predict if we have a slight bias (more than 33% chance)
         if r_count > p_count and r_count > s_count: best_hand = HandShape.ROCK
         elif p_count > r_count and p_count > s_count: best_hand = HandShape.PAPER
         elif s_count > r_count and s_count > p_count: best_hand = HandShape.SCISSORS
@@ -106,24 +105,27 @@ class GameStrategy:
         return self.rules.get((my_hand, opp_hand), 0)
 
     def solve_nash(self, my_hands, opp_hands, prediction=None):
-        # HYBRID SWITCH:
         if prediction is not None and prediction in opp_hands:
-            # MODE: EXPLOIT (Markov)
             score0 = self.determine_winner(my_hands[0], prediction)
             score1 = self.determine_winner(my_hands[1], prediction)
             if score0 > score1: return my_hands[0], f"KILLER: {my_hands[0].name}"
             elif score1 > score0: return my_hands[1], f"KILLER: {my_hands[1].name}"
 
-        # MODE: SAFETY (Nash)
         score0 = self.determine_winner(my_hands[0], opp_hands[0]) + self.determine_winner(my_hands[0], opp_hands[1])
         score1 = self.determine_winner(my_hands[1], opp_hands[0]) + self.determine_winner(my_hands[1], opp_hands[1])
         rec = my_hands[0] if score0 >= score1 else my_hands[1]
-        return rec, f"NASH: {rec.name}"
+        return rec, f"KEEP {rec.name}"
 
 class HandDetector:
     def __init__(self):
         self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(static_image_mode=False, max_num_hands=4, min_detection_confidence=0.5)
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False, 
+            max_num_hands=4, 
+            min_detection_confidence=0.3, 
+            min_tracking_confidence=0.3,
+            model_complexity=1
+        )
         self.mp_draw = mp.solutions.drawing_utils
 
     def get_dist(self, p1, p2): return math.hypot(p1.x - p2.x, p1.y - p2.y)
@@ -163,7 +165,6 @@ predictor = MarkovPredictor()
 
 def generate_report():
     history = state.stats_history
-    # Smart Accuracy: Only count rounds where AI *attempted* a prediction
     attempts = history["prediction_attempts"]
     
     if attempts == 0:
@@ -180,7 +181,6 @@ def generate_report():
     if counts:
         fav_hand, fav_count = counts.most_common(1)[0]
         fav_hand_name = fav_hand.name
-        # Predictability is based on total rounds
         pred_score = f"{int((fav_count / len(moves)) * 100)}%"
     
     state.final_report = {
@@ -192,7 +192,6 @@ def generate_report():
 def perform_judgement(p1_hand, p2_hand):
     state.stats_history["player_moves"].append(p1_hand)
     
-    # SMART STATS: Only update accuracy if AI was in Markov Mode
     if state.ai_was_predicting:
         state.stats_history["prediction_attempts"] += 1
         if state.last_prediction_raw == p1_hand:
@@ -260,13 +259,12 @@ def draw_hud(frame, opp_display, my_display, strategy_text, center_msg, msg_colo
     bar_max_w = sidebar_w - 90 
     bar_h = 8
     
-    # VISUALIZE ACTIVE MODE
     if stats["active_mode"] == "NASH":
-        bar_col = (50, 50, 50) # Greyed out
+        bar_col = (50, 50, 50) 
         pred_label = "OBSERVING..."
         pred_col = (100, 100, 100)
     else:
-        bar_col = None # Use standard colors
+        bar_col = None 
         pred_label = stats["pred"]
         pred_col = (0, 255, 255)
 
@@ -385,7 +383,7 @@ def generate_frames():
                 pred_to_use = best_guess if is_markov_active else None
                 state.last_prediction_raw = pred_to_use
                 
-                # --- NEW: Record that we TRIED to predict this round ---
+                # Update: Record we tried to predict
                 state.ai_was_predicting = is_markov_active
                 
                 state.frozen_strategy = strategy.solve_nash(current_my, current_opp, pred_to_use)[1]
